@@ -1,0 +1,506 @@
+# Analisis Arsitektur Backend & Dokumentasi API: INFEST USK 2025
+
+Dokumentasi ini berisi hasil analisis menyeluruh arsitektur backend, alur autentikasi, model database, skema validasi, dan temuan teknis (security/bugs) pada project Next.js **INFEST USK 2025 Admin**.
+
+---
+
+## Daftar Isi
+1. [Pendahuluan & Paradigma Arsitektur](#1-pendahuluan--paradigma-arsitektur)
+2. [Struktur Folder Backend](#2-struktur-folder-backend)
+3. [Analisis Dependencies Backend](#3-analisis-dependencies-backend)
+4. [Environment Variables](#4-environment-variables)
+5. [Daftar Endpoint API & Alur Kerja](#5-daftar-endpoint-api--alur-kerja)
+6. [Autentikasi & Otorisasi](#6-autentikasi--otorisasi)
+7. [Middleware & Proteksi Route](#7-middleware--proteksi-route)
+8. [Database Schema & Query Mapping](#8-database-schema--query-mapping)
+9. [Service Layer (Lapisan Layanan)](#9-service-layer-lapisan-layanan)
+10. [Validasi Request & Response](#10-validasi-request--response)
+11. [Penanganan Error (Error Handling)](#11-penanganan-error-error-handling)
+12. [Layanan Eksternal (External Services)](#12-layanan-eksternal-external-services)
+13. [Flow Diagram Alur Kerja Utama](#13-flow-diagram-alur-kerja-utama)
+14. [Tabel Ringkasan Endpoint & Aksi](#14-tabel-ringkasan-endpoint--aksi)
+15. [Temuan Arsitektur & Keamanan (Findings)](#15-temuan-arsitektur--keamanan-findings)
+
+---
+
+## 1. Pendahuluan & Paradigma Arsitektur
+
+Project **INFEST USK 2025 Admin** merupakan aplikasi backoffice untuk mengelola pendaftaran peserta, tim, dan administrasi kompetisi Informatika Festival (INFEST) Universitas Syiah Kuala 2025. 
+
+Secara paradigma arsitektural, aplikasi ini menerapkan **Backend-as-a-Service (BaaS)** berbasis **Supabase**. Mayoritas operasi manipulasi database dan manajemen autentikasi diinisiasi langsung dari client-side browser menggunakan SDK Supabase Client (`@supabase/supabase-js`), memanfaatkan Row Level Security (RLS) pada PostgreSQL untuk keamanan.
+
+Namun, untuk proses backend yang membutuhkan privasi credential atau integrasi SMTP mail server, Next.js menyediakan **Route Handler** (server-side endpoint) di bawah `/api/send-notification-email`.
+
+---
+
+## 2. Struktur Folder Backend
+
+Berikut adalah diagram folder yang merepresentasikan berkas-berkas backend, middleware, tipe data, dan service layer:
+
+```
+informaticsfestival2025_admin-main
+├── middleware.ts                   # Next.js Middleware (Proteksi halaman & redirect logic)
+├── next.config.ts                  # Konfigurasi Next.js
+├── package.json                    # Konfigurasi dependencies & script build
+└── src
+    ├── app
+    │   ├── api
+    │   │   └── send-notification-email
+    │   │       └── route.ts        # Route Handler POST: Pengiriman email notifikasi status registrasi
+    │   └── (sites)
+    │       ├── (auth)
+    │       │   └── login
+    │       │       └── page.tsx    # Halaman Sign-in Admin (Menginisiasi session Supabase)
+    │       └── (dashboard)
+    │           ├── competitions
+    │           │   └── [id]
+    │           │       └── page.tsx # Halaman Kelola Registrasi Kompetisi (Pemicu email notifikasi)
+    │           └── layout.tsx       # Root Dashboard Layout
+    ├── libs
+    │   ├── contexts
+    │   │   └── AdminAuthContext.tsx # Context React untuk state user & fungsi login/logout
+    │   ├── helpers
+    │   │   └── competitionAuthorization.ts # Validasi izin akses kompetisi berdasarkan role admin
+    │   ├── hooks
+    │   │   └── useAdminDashboard.ts # Custom hooks untuk operasi baca/tulis data ke database
+    │   └── services
+    │       ├── adminAuthService.ts  # Logic sign-in & sinkronisasi user profile ke Supabase
+    │       ├── adminDashboardService.ts # Kumpulan query database Supabase untuk panel admin
+    │       ├── emailService.ts      # HTTP Client Helper pemicu API send-notification-email
+    │       └── supabaseClient.ts    # Inisialisasi Supabase Client & Service Role Client (Admin)
+    └── types
+        ├── admin.ts                 # Definisi type user, tim, registrasi, kompetisi
+        └── database.ts              # Type definition auto-generated PostgreSQL Supabase
+```
+
+---
+
+## 3. Analisis Dependencies Backend
+
+Berikut adalah analisis ketergantungan (dependencies) dalam berkas `package.json` yang berkaitan langsung dengan operasional backend:
+
+| Package | Versi | Status Penggunaan | Fungsi di Dalam Project |
+| :--- | :--- | :--- | :--- |
+| `next` | `15.3.5` | **Digunakan Aktif** | Menyediakan router (App Router), engine SSR/Static, middleware, dan Route Handler server-side untuk endpoint API. |
+| `@supabase/supabase-js` | `^2.50.0` | **Digunakan Aktif** | Client SDK utama untuk berinteraksi dengan API Supabase (Autentikasi & Database) di browser maupun server. |
+| `nodemailer` | `^7.0.5` | **Digunakan Aktif** | Digunakan di server-side untuk mengirim email notifikasi persetujuan/penolakan registrasi via SMTP Gmail. |
+| `@supabase/ssr` | `^0.6.1` | **TIDAK DIGUNAKAN** | Dideklarasikan di `package.json` namun tidak diimpor sama sekali di kode program. *Catatan: Ketidakadaannya menyebabkan kegagalan sinkronisasi token session ke cookies secara native.* |
+| `jsonwebtoken` | `^9.0.2` | **TIDAK DIGUNAKAN** | Tidak ada impor untuk library ini. Autentikasi sepenuhnya didelegasikan ke token bawaan Supabase. |
+| `dotenv` | `^17.2.0` | **TIDAK DIGUNAKAN** | Tidak diimpor secara eksplisit karena Next.js secara otomatis meload berkas `.env` ke `process.env`. |
+| `tsx` | `^4.19.2` | **TIDAK AKTIF (File Hilang)** | Dideklarasikan untuk mengeksekusi skrip CLI di `package.json` (`create-admin` dan `broadcast`), tetapi folder skrip `src/libs/scripts/` **tidak ada di repositori**. |
+
+---
+
+## 4. Environment Variables
+
+Berdasarkan pemindaian kode sumber, berikut adalah variabel lingkungan (environment variables) yang dibutuhkan untuk operasional backend beserta cakupan penggunaannya:
+
+### 1. Variabel Klien & API Database (Supabase)
+* **`NEXT_PUBLIC_SUPABASE_URL`**
+  * **Lokasi Penggunaan**: [client.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/supabase/client.ts#L3), [supabaseClient.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/supabaseClient.ts#L8)
+  * **Deskripsi**: URL endpoint API REST database Supabase.
+* **`NEXT_PUBLIC_SUPABASE_ANON_KEY`**
+  * **Lokasi Penggunaan**: [client.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/supabase/client.ts#L4), [supabaseClient.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/supabaseClient.ts#L17)
+  * **Deskripsi**: API key publik untuk akses Supabase dengan izin tingkat RLS standard.
+* **`NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`**
+  * **Lokasi Penggunaan**: [supabaseClient.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/supabaseClient.ts#L28)
+  * **Deskripsi**: API key dengan hak akses penuh bypass RLS. *(Penting: Memiliki awalan `NEXT_PUBLIC_` yang memaparkannya ke browser).*
+
+### 2. Variabel Layanan Email (SMTP)
+* **`EMAIL_USER`**
+  * **Lokasi Penggunaan**: [route.ts (API send email)](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/app/api/send-notification-email/route.ts#L9)
+  * **Deskripsi**: Alamat email pengirim (biasanya Gmail) yang dipakai untuk autentikasi SMTP.
+* **`EMAIL_PASS`**
+  * **Lokasi Penggunaan**: [route.ts (API send email)](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/app/api/send-notification-email/route.ts#L10)
+  * **Deskripsi**: App Password Gmail (bukan password akun utama) untuk bypass 2FA SMTP.
+* **`EMAIL_FROM`**
+  * **Lokasi Penggunaan**: [route.ts (API send email)](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/app/api/send-notification-email/route.ts#L172)
+  * **Deskripsi**: Nama alias pengirim email default. Jika tidak diset, nilainya otomatis menggunakan `EMAIL_USER`.
+
+---
+
+## 5. Daftar Endpoint API & Alur Kerja
+
+Aplikasi Next.js ini memiliki **satu** endpoint custom Route Handler:
+
+### **POST `/api/send-notification-email`**
+* **Nama Berkas**: `src/app/api/send-notification-email/route.ts`
+* **Keamanan / Auth**: **Public** (Tidak memeriksa Bearer Token, Session Cookie, atau API key).
+* **Fungsi**: Mengirimkan email notifikasi status pendaftaran ke email ketua tim peserta.
+
+#### **Alur Kerja Endpoint**:
+1. Menerima request POST yang membawa data tim, nama ketua, email, dan status kelulusan (`approved` atau `rejected`).
+2. Melakukan validasi dasar (kehadiran field wajib).
+3. Melakukan normalisasi URL logo sponsor dan media partner agar kompatibel dengan email client (Google Drive ID parser ke direct download link).
+4. Menghasilkan dokumen HTML dinamis dari template email berdasarkan status persetujuan, termasuk menyisipkan tautan WhatsApp group jika status adalah `approved`.
+5. Mengirimkan email menggunakan transporter `nodemailer` via Gmail SMTP.
+6. Mengembalikan response status sukses atau error dalam bentuk JSON.
+
+---
+
+## 6. Autentikasi & Otorisasi
+
+Arsitektur autentikasi dalam sistem ini didesain sebagai berikut:
+
+### 1. Proses Autentikasi (Sign-In)
+* **Tempat Token Dibuat**: Autentikasi ditangani langsung oleh sistem Supabase Auth di server Supabase saat method `supabase.auth.signInWithPassword` dipanggil di [adminAuthService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminAuthService.ts#L20).
+* **Penyimpanan Token**: Secara bawaan, SDK `@supabase/supabase-js` menyimpan token session (access token JWT dan refresh token) di `localStorage` pada browser klien.
+* **Verifikasi Token**: Setiap query yang dikirimkan ke database Supabase secara otomatis melampirkan JWT di header HTTP `Authorization: Bearer <token>`. Postgres Supabase memverifikasi token ini secara kriptografis untuk mencocokkan identitas pengguna dengan aturan Row Level Security (RLS).
+
+### 2. Otorisasi Peran (Role-Based Access Control)
+Terdapat dua level peran admin yang tersimpan di tabel `admin_users`:
+1. **`SUPER_ADMIN`**
+   * Memiliki akses tak terbatas ke seluruh data registrasi di semua jenis kompetisi.
+2. **`ADMIN`**
+   * Memiliki akses terbatas yang terikat dengan satu kompetisi tertentu via kolom `admin_competition_id` di tabel `admin_users`.
+   * Pengecekan dilakukan secara programatik via helper [isAuthorizedForCompetition](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/helpers/competitionAuthorization.ts#L3) pada halaman kelola kompetisi.
+
+---
+
+## 7. Middleware & Proteksi Route
+
+Next.js mengandalkan berkas [middleware.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/middleware.ts) di tingkat root untuk membatasi navigasi halaman pada sisi server:
+
+### 1. Konfigurasi Proteksi
+* **Protected Routes (Harus Login)**: `/`, `/users`, `/competitions`, `/teams`, `/settings`.
+* **Auth Routes (Hanya untuk tamu)**: `/login` (jika admin sudah login mengakses `/login`, dia akan langsung dilempar ke `/`).
+
+### 2. Mekanisme Pengecekan Token Middleware
+Middleware membaca cookie session dengan nama:
+`sb-qxesqdjdiuuzhmgadewe-auth-token` (format default token Supabase Auth).
+* Jika rute termasuk *Protected Route* dan cookie tersebut **tidak ada**, user dialihkan ke `/login`.
+* Jika rute termasuk *Auth Route* (`/login`) dan cookie tersebut **ada**, user dialihkan ke dashboard `/`.
+
+### 3. Masalah Desain Rute API
+Konfigurasi matcher mengecualikan rute API:
+```typescript
+export const config = {
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|public).*)']
+};
+```
+Karena hal ini, **seluruh endpoint API di `/api/*` dilewati begitu saja oleh middleware**, tidak mendapatkan proteksi autentikasi apapun di tingkat server.
+
+---
+
+## 8. Database Schema & Query Mapping
+
+Database di-host di Supabase PostgreSQL. Berdasarkan analisis service layer dan berkas types, berikut adalah pemetaan struktur tabel serta interaksinya dengan modul admin.
+
+### Skema Tabel Database
+
+```mermaid
+erDiagram
+    admin_users {
+        uuid id PK
+        varchar username
+        uuid admin_competition_id FK
+        varchar email
+        varchar full_name
+        varchar role "ADMIN | SUPER_ADMIN"
+        boolean is_active
+        timestamp created_at
+    }
+    user_profiles {
+        uuid id PK
+        varchar full_name
+        varchar email
+        varchar whatsapp
+        date date_of_birth
+        varchar gender "male | female"
+        varchar university
+        varchar major
+        varchar student_id
+        uuid team_id FK
+        boolean is_team_leader
+        timestamp created_at
+    }
+    competitions {
+        uuid id PK
+        varchar name
+        varchar slug
+        text description
+        numeric registration_fee
+        varchar whatsapp_group
+        varchar status "draft | open | ongoing | closed | completed"
+        timestamp created_at
+    }
+    teams {
+        uuid id PK
+        varchar name
+        varchar code
+        varchar status "active | inactive | disbanded"
+        uuid created_by FK
+        timestamp created_at
+    }
+    competition_registrations {
+        uuid id PK
+        uuid competition_id FK
+        uuid team_id FK
+        varchar status "pending | approved | rejected | withdrawn"
+        timestamp registration_date
+        timestamp approved_at
+        text payment_proof_url
+        text proposal_url
+        text orisinalitas_url
+        text twibbon_proof_url
+        text admin_notes
+    }
+
+    admin_users ||--o| competitions : "manages (for role ADMIN)"
+    user_profiles ||--o| teams : "belongs_to"
+    teams ||--o| user_profiles : "created_by"
+    competition_registrations ||--|| competitions : "registers_to"
+    competition_registrations ||--|| teams : "submitted_by"
+```
+
+### Pemetaan Query Database
+
+Berikut adalah mapping alur akses dari fungsi antarmuka hingga tabel tujuan:
+
+```
+[Komponen Antarmuka] ──> [Fungsi Service Layer] ──> [Query Supabase (Rest API / Postgres)] ──> [Tabel Database]
+```
+
+1. **Dashboard Statistik**
+   * `getDashboardStats()` ──> `SELECT COUNT` ──> `user_profiles`
+   * `getDashboardStats()` ──> `SELECT COUNT WHERE status=active` ──> `teams`
+   * `getDashboardStats()` ──> `SELECT COUNT WHERE status in [open, ongoing]` ──> `competitions`
+   * `getDashboardStats()` ──> `SELECT status` ──> `competition_registrations`
+
+2. **Manajemen User**
+   * `getAllUsers(page, limit, search, teamFilter)` ──> `SELECT` dengan pagination `.range()` ──> `user_profiles` joined `teams`
+
+3. **Registrasi Kompetisi**
+   * `getCompetitionRegistrations(competitionId)` ──> `SELECT` filter `competition_id` ──> `competition_registrations` joined `teams` & `user_profiles`
+
+4. **Pembaruan Status Tim**
+   * `updateRegistrationStatus(registrationId, status, adminNotes)` ──> `UPDATE` status & notes ──> `competition_registrations`
+   * `updateCompetitionWhatsappGroup(competitionId, url)` ──> `UPDATE` whatsapp_group ──> `competitions`
+
+5. **Manajemen Tim**
+   * `fetchTeams(page, limit, search, status)` ──> `SELECT` view/table ──> View `teams_with_member_count` atau fallback tabel `teams`
+
+---
+
+## 9. Service Layer (Lapisan Layanan)
+
+Arsitektur aplikasi memisahkan logika pemrosesan data ke dalam subfolder `src/libs/services`:
+
+* **`adminAuthService.ts` (AdminAuthService)**
+  * **Fungsi**: Mengelola interaksi autentikasi admin.
+  * **Fitur**: `login` (via Supabase Auth), `logout`, `getCurrentUser` (mengambil profil dari tabel `admin_users`), `onAuthStateChange` (mendengarkan event login/logout).
+* **`adminDashboardService.ts` (adminDashboardService)**
+  * **Fungsi**: Berisi kumpulan query manipulasi database admin.
+  * **Fitur**: Mengambil statistik dasbor, list peserta terpaginasi, ekspor data pendaftaran, update status kelulusan (approve/reject), edit tautan grup whatsapp kompetisi, manajemen anggota tim.
+* **`emailService.ts` (sendRegistrationStatusEmail)**
+  * **Fungsi**: HTTP client wrapper untuk memicu Route Handler Next.js.
+  * **Fitur**: Mengirimkan request POST JSON ke `/api/send-notification-email`.
+* **`supabaseClient.ts`**
+  * **Fungsi**: Menyediakan instance Supabase Client.
+  * **Fitur**: `supabase` (client standar) dan `getSupabaseAdmin` (menggunakan service role key untuk tugas administratif bypass RLS).
+
+---
+
+## 10. Validasi Request & Response
+
+### Endpoint: `POST /api/send-notification-email`
+
+#### **Request Body (JSON)**
+Semua field berikut bertipe `string` dan wajib dikirimkan (kecuali `adminNotes` dan `whatsappGroupLink` yang bersifat opsional):
+```json
+{
+  "teamName": "Tim Antigravity",
+  "teamLeaderName": "Irfan",
+  "teamLeaderEmail": "irfan@domain.com",
+  "competitionName": "UI/UX Design Competition",
+  "status": "approved", // "approved" atau "rejected"
+  "adminNotes": "Bukti pembayaran valid, selamat bergabung!", // opsional
+  "whatsappGroupLink": "https://chat.whatsapp.com/Gxyz..." // opsional, hanya dikirim jika status approved
+}
+```
+
+#### **Response (Success - HTTP 200)**
+```json
+{
+  "success": true,
+  "message": "Email notification sent successfully"
+}
+```
+
+#### **Response (Validation Error - HTTP 400)**
+Terjadi apabila ada field wajib (`teamLeaderEmail`, `teamName`, `competitionName`, atau `status`) yang bernilai kosong atau tidak dikirim.
+```json
+{
+  "error": "Missing required fields"
+}
+```
+
+#### **Response (Server Error - HTTP 500)**
+Terjadi apabila koneksi SMTP gagal atau transporter Nodemailer mengalami kendala crash internal.
+```json
+{
+  "error": "Failed to send email notification"
+}
+```
+
+---
+
+## 11. Penanganan Error (Error Handling)
+
+Pola penanganan kesalahan dalam backend project ini mengadopsi prinsip **Graceful Failures**:
+
+### 1. Blok `try-catch` Luas
+Setiap fungsi di service layer dibungkus dalam blok `try-catch`. Ketika terjadi kesalahan, sistem tidak membiarkan aplikasi crash (throw error), melainkan menangkap error tersebut, mencatatnya ke konsol log via `console.error`, dan mengembalikan object status gagal untuk ditangani UI:
+```typescript
+try {
+  // Query / Aksi database
+} catch (error: any) {
+  console.error("Context error:", error);
+  return { success: false, error: "Pesan kesalahan yang user-friendly" };
+}
+```
+
+### 2. Status Code HTTP pada Route Handler
+Di route handler server-side (`/api/send-notification-email`), error ditangkap dan dibungkus menggunakan Response JSON Next.js dengan status code yang tepat:
+* **`400 Bad Request`**: Kesalahan parameter input / data tidak lengkap.
+* **`500 Internal Server Error`**: Kegagalan sistem eksternal (SMTP gagal).
+
+### 3. Toast UI Notification
+Hasil error yang dikembalikan oleh service layer ditangkap di halaman antarmuka (Client Components) lalu ditampilkan ke admin dalam bentuk pop-up toast yang interaktif menggunakan library `react-hot-toast` (`toast.error(...)`).
+
+---
+
+## 12. Layanan Eksternal (External Services)
+
+Backend terintegrasi dengan layanan pihak ketiga berikut:
+
+1. **Supabase (BaaS)**
+   * **Database**: PostgreSQL berkapasitas RLS.
+   * **Autentikasi**: Supabase Auth OAuth/Password Manager.
+   * **Penyimpanan Berkas (Storage)**: Menyimpan berkas bukti pembayaran, proposal, surat orisinalitas, dan bukti twibbon.
+2. **Gmail SMTP (Nodemailer Transporter)**
+   * Digunakan untuk mengirim email transaksional status registrasi secara asinkron.
+3. **Google Drive API (Parser)**
+   * Endpoint email secara otomatis mendeteksi URL berkas yang di-upload dari Google Drive (format `/file/d/<id>/`) dan mengonversinya menjadi URL direct download (`/uc?export=view&id=<id>`) agar logo instansi atau file gambar bisa dimuat langsung di aplikasi pembaca email (seperti Gmail, Outlook).
+
+---
+
+## 13. Flow Diagram Alur Kerja Utama
+
+### 1. Alur Pengiriman Notifikasi Email (`POST /api/send-notification-email`)
+
+```mermaid
+sequenceDiagram
+    participant Client as Admin Browser (Dashboard UI)
+    participant Server as Next.js API Route Handler
+    participant Gmail as Gmail SMTP Server
+    participant UserMail as Email Ketua Tim (Peserta)
+
+    Client->>Server: HTTP POST /api/send-notification-email (JSON data)
+    Note over Server: Validasi input: Apakah field wajib lengkap?<br/>(teamName, email, status, dll)
+    alt Data Tidak Lengkap
+        Server-->>Client: HTTP 400 (JSON Error: Missing required fields)
+    else Data Lengkap & Valid
+        Note over Server: Render Email Template HTML<br/>Normalize Drive Links & Load Sponsors Logos
+        Server->>Gmail: Kirim email via Nodemailer SMTP (SSL/TLS Auth)
+        alt SMTP Transaksi Sukses
+            Gmail-->>Server: Email terkirim
+            Server-->>Client: HTTP 200 (JSON Success: Email sent successfully)
+            Gmail->>UserMail: Kirim Email Notifikasi Ke Penerima
+        else SMTP Transaksi Gagal (Timeout / Auth Fail)
+            Server-->>Client: HTTP 500 (JSON Error: Failed to send email)
+        end
+    end
+```
+
+### 2. Alur Pengelolaan Registrasi Tim (Approve/Reject)
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin Panel (User)
+    participant Client as Browser (React/Next.js Context)
+    participant SupabaseDB as Supabase Database (PostgreSQL RLS)
+    participant API as Next.js API Route Handler
+    participant SMTP as Gmail SMTP Server
+
+    Admin->>Client: Klik Approve / Reject Registrasi Tim
+    Client->>SupabaseDB: UPDATE competition_registrations SET status = 'approved/rejected'
+    alt Update Database Sukses
+        SupabaseDB-->>Client: OK (Data terupdate)
+        Note over Client: Ambil Email Ketua Tim & Nama Kompetisi
+        Client->>API: POST /api/send-notification-email (Data Notifikasi)
+        API->>SMTP: Kirim Email SMTP
+        SMTP-->>API: OK (Email Terkirim)
+        API-->>Client: HTTP 200 Success
+        Client-->>Admin: Tampilkan Toast Sukses (Registrasi & Email Berhasil)
+    else Update Database Gagal
+        SupabaseDB-->>Client: Error (RLS Blocked / DB Error)
+        Client-->>Admin: Tampilkan Toast Error (Status Gagal Diperbarui)
+    end
+```
+
+---
+
+## 14. Tabel Ringkasan Endpoint & Aksi
+
+Berikut tabel ringkasan aksi pemrosesan data backend (gabungan Route Handler lokal dan query langsung ke database Supabase):
+
+| Tipe Aksi | Rute / Target Operasi | Method / Method SDK | Autentikasi | Database / Tabel | Lokasi Berkas Kode |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Route Handler** | `/api/send-notification-email` | `POST` | **Public** | - | [route.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/app/api/send-notification-email/route.ts) |
+| **Database** | Sign-In Admin | `signInWithPassword` | Public | Auth Engine & `admin_users` | [adminAuthService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminAuthService.ts) |
+| **Database** | Baca Statistik Dasbor | `SELECT` | Terotentikasi | `user_profiles`, `teams`, `competitions`, `competition_registrations` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+| **Database** | Baca Semua User | `SELECT` | Terotentikasi | `user_profiles` joined `teams` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+| **Database** | Baca Registrasi Kompetisi | `SELECT` | Terotentikasi | `competition_registrations` joined `teams` & `user_profiles` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+| **Database** | Update Status Registrasi | `UPDATE` | Terotentikasi | `competition_registrations` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+| **Database** | Update Grup WA Lomba | `UPDATE` | Terotentikasi | `competitions` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+| **Database** | Baca Semua Tim | `SELECT` | Terotentikasi | View `teams_with_member_count` / `teams` | [adminDashboardService.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/adminDashboardService.ts) |
+
+---
+
+## 15. Temuan Arsitektur & Keamanan (Findings)
+
+Selama proses scanning dan peninjauan arsitektur kode sumber backend, ditemukan beberapa celah keamanan, kesalahan konfigurasi, dan potensi bug yang perlu segera diperbaiki:
+
+### 1. Paparan Supabase Service Role Key di Sisi Browser (Browser Leak)
+* **Tingkat Keparahan**: 🚨 **CRITICAL**
+* **Deskripsi**: Variabel `process.env.NEXT_PUBLIC_SUPABASE_ROLE_KEY` memiliki awalan `NEXT_PUBLIC_`. Di Next.js, variabel dengan awalan tersebut secara otomatis diekspos ke browser bundle dan dapat dibaca oleh siapa saja melalui panel devtools browser. Terlebih lagi, pengecekan `typeof window !== 'undefined'` di [supabaseClient.ts](file:///home/irfan/Project/infest_admin/informaticsfestival2025_admin-main/src/libs/services/supabaseClient.ts#L25-L27) sengaja dikomentari, memungkinkan client-side mengeksekusi klien bypass RLS.
+* **Dampak**: Penyerang dapat mencuri service role key ini dan menggunakannya untuk membaca, memodifikasi, atau menghapus seluruh tabel database di Supabase tanpa terhalang kebijakan RLS (Row Level Security).
+* **Rekomendasi Perbaikan**: 
+  1. Hapus awalan `NEXT_PUBLIC_` dari variabel tersebut (ubah menjadi `SUPABASE_SERVICE_ROLE_KEY`).
+  2. Aktifkan kembali proteksi error server-only pada fungsi inisialisasi:
+     ```typescript
+     if (typeof window !== 'undefined') {
+       throw new Error('Service role key should not be used in the browser');
+     }
+     ```
+
+### 2. Endpoint API Kirim Email Tanpa Proteksi Autentikasi (Public SMTP Abuse)
+* **Tingkat Keparahan**: 🔥 **HIGH**
+* **Deskripsi**: Rute `/api/send-notification-email` adalah endpoint POST publik yang sama sekali tidak memeriksa session token admin maupun API key. Rute ini juga dikecualikan secara eksplisit oleh middleware.
+* **Dampak**: Pihak luar (bot/attacker) dapat mengirimkan request spam secara massal ke endpoint ini untuk mengirim email phishing atau spam kepada siapa saja menggunakan SMTP Gmail resmi INFEST. Hal ini dapat menghabiskan kuota harian pengiriman email SMTP dan menandai domain resmi INFEST sebagai penyebar spam (domain blacklisting).
+* **Rekomendasi Perbaikan**: 
+  Verifikasi sesi pengguna secara server-side di route handler sebelum memproses pengiriman email:
+  ```typescript
+  import { createServerClient } from "@supabase/ssr";
+  // Verifikasi JWT session cookie user di server-side sebelum memproses email
+  ```
+
+### 3. Middleware Autentikasi Mengalami Kerusakan Desain (Broken Cookie Sync)
+* **Tingkat Keparahan**: 🔥 **HIGH**
+* **Deskripsi**: Berkas `middleware.ts` membaca cookie `sb-qxesqdjdiuuzhmgadewe-auth-token` untuk mendeteksi status login. Namun, inisialisasi Supabase client di `adminAuthService.ts` hanya menggunakan SDK standar `@supabase/supabase-js` yang menyimpan token di browser `localStorage`. Tidak ada logika di client-side maupun server-side yang menyalin token ini ke cookie.
+* **Dampak**: Admin akan terjebak dalam siklus pengalihan halaman (redirect loop) ke `/login` saat mencoba mengakses halaman dasbor, karena middleware di server-side tidak pernah mendeteksi kehadiran cookie tersebut, meskipun admin sebenarnya sudah sukses login di sisi klien (local storage).
+* **Rekomendasi Perbaikan**: 
+  Gunakan `@supabase/ssr` untuk menginisialisasi Supabase client di Next.js yang secara otomatis mengelola sinkronisasi token autentikasi ke dalam cookie HTTP-only.
+
+### 4. Skrip Pengaturan SQL Database & CLI Hilang dari Repositori (Missing Scripts)
+* **Tingkat Keparahan**: ⚠️ **MEDIUM**
+* **Deskripsi**: Script `create-admin` dan `setup-db` di `package.json` merujuk ke berkas di folder `src/libs/scripts/` (seperti `create-admin.ts` dan `admin_users_schema.sql`). Namun, berkas-berkas tersebut tidak ada di repositori.
+* **Dampak**: Developer baru tidak dapat melakukan migrasi awal database lokal atau membuat akun administrator pertama via CLI.
+* **Rekomendasi Perbaikan**: Kembalikan atau buat ulang file-file skrip tersebut agar developer bisa melakukan setup secara mulus.
+
+### 5. Dependency Terinstal tetapi Tidak Digunakan (Unused Dependencies)
+* **Tingkat Keparahan**: ℹ️ **LOW**
+* **Deskripsi**: Package `jsonwebtoken` dan `@supabase/ssr` terinstal di dependencies `package.json` tetapi tidak ada berkas kode program yang mengimpornya.
+* **Dampak**: Menambah ukuran folder `node_modules` secara tidak perlu.
+* **Rekomendasi Perbaikan**: Hapus package tersebut via `npm uninstall jsonwebtoken @supabase/ssr` jika memang sistem autentikasi murni mengandalkan SDK Supabase Client bawaan.

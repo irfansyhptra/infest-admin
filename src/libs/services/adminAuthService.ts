@@ -1,0 +1,221 @@
+import { supabase } from "@/libs/supabase/client";
+import { AdminUser, AdminLoginResponse } from "@/types/admin";
+import { User } from "@supabase/supabase-js";
+
+export class AdminAuthService {
+  /**
+   * Login admin dengan email dan password
+   */
+  async login(email: string, password: string): Promise<AdminLoginResponse> {
+    try {
+      // Validasi basic
+      if (!email || !password) {
+        return {
+          success: false,
+          error: "Email dan password harus diisi",
+        };
+      }
+
+      // Login dengan Supabase Auth
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: email,
+          password: password,
+        });
+
+      if (authError) {
+        console.error("Supabase auth error:", authError);
+
+        if (authError.message.includes("Invalid login credentials")) {
+          return {
+            success: false,
+            error: "Email atau password salah",
+          };
+        } else if (authError.message.includes("Email not confirmed")) {
+          return {
+            success: false,
+            error: "Email belum diverifikasi",
+          };
+        } else {
+          return {
+            success: false,
+            error: "Gagal login: " + authError.message,
+          };
+        }
+      }
+
+      if (!authData.user) {
+        return {
+          success: false,
+          error: "Gagal mendapatkan data user",
+        };
+      }
+
+      const { data, error } = await supabase
+        .from("admin_users")
+        .select("admin_competition_id, role")
+        .eq("id", authData.user.id)
+        .single();
+
+      if (error) {
+        console.error("Error fetching admin user data:", error);
+        return {
+          success: false,
+          error: "Gagal mendapatkan data admin",
+        };
+      }
+
+      const adminUser: AdminUser = {
+        id: authData.user.id,
+        username: authData.user.email?.split("@")[0] || "admin",
+        email: authData.user.email || "",
+        full_name: authData.user.user_metadata?.full_name || "Administrator",
+        role: data?.role || "ADMIN",
+        competition_id: data?.admin_competition_id || null,
+        is_active: true,
+        created_at: authData.user.created_at || new Date().toISOString(),
+        updated_at:
+          (authData.user as any).updated_at ||
+          authData.user.last_sign_in_at ||
+          new Date().toISOString(),
+        last_login: new Date().toISOString(),
+      };
+      console.log("Login successful for user ID:", adminUser);
+
+      return {
+        success: true,
+        user: adminUser,
+      };
+    } catch (error: any) {
+      console.error("Login error:", error);
+      return {
+        success: false,
+        error: "Terjadi kesalahan sistem",
+      };
+    }
+  }
+
+  /**
+   * Logout admin
+   */
+  async logout(): Promise<void> {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  }
+
+  /**
+   * Get current authenticated admin user
+   */
+  async getCurrentUser(): Promise<AdminUser | null> {
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        return null;
+      }
+
+      const { data, error: errorAdmin } = await supabase
+        .from("admin_users")
+        .select("admin_competition_id, role")
+        .eq("id", user.id)
+        .single();
+
+      if (errorAdmin) {
+        console.error("Error fetching admin user data:", errorAdmin);
+        return null;
+      }
+
+      const userAdmin = {
+        ...user,
+        user_metadata: { 
+          ...user.user_metadata,
+          role: data?.role || "ADMIN",
+          competition_id: data?.admin_competition_id || null,
+        },
+
+      };
+
+      return this.getAdminUserFromAuth(userAdmin);
+    } catch (error) {
+      console.error("Get current user error:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if user is authenticated
+   */
+  async isAuthenticated(): Promise<boolean> {
+    const user = await this.getCurrentUser();
+    return user !== null;
+  }
+
+  /**
+   * Get admin user data from auth user
+   */
+  private getAdminUserFromAuth(authUser: User): AdminUser {
+    return {
+      id: authUser.id,
+      username: authUser.email?.split("@")[0] || "admin",
+      email: authUser.email || "",
+      full_name: authUser.user_metadata?.full_name || "Administrator",
+      role: authUser.user_metadata?.role || "ADMIN",
+      competition_id: authUser.user_metadata?.competition_id || null,
+      is_active: true,
+      created_at: authUser.created_at || new Date().toISOString(),
+      updated_at: (authUser as any).updated_at || new Date().toISOString(),
+      last_login: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Listen to auth state changes
+   */
+  onAuthStateChange(callback: (user: AdminUser | null) => void) {
+    return supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        const adminUser = this.getAdminUserFromAuth(session.user);
+        callback(adminUser);
+      } else if (event === "SIGNED_OUT") {
+        callback(null);
+      }
+    });
+  }
+
+  /**
+   * Get admin client with authenticated context
+   */
+  getAuthenticatedClient() {
+    return supabase;
+  }
+
+  /**
+   * Refresh authentication status
+   */
+  async refreshAuth(): Promise<AdminUser | null> {
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        return null;
+      }
+
+      return this.getAdminUserFromAuth(user);
+    } catch (error) {
+      console.error("Refresh auth error:", error);
+      return null;
+    }
+  }
+}
+
+// Export singleton instance
+export const adminAuthService = new AdminAuthService();
