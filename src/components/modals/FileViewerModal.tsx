@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { X, FileText, Download, ExternalLink } from "lucide-react";
 
 interface FileViewerModalProps {
@@ -12,6 +12,12 @@ interface FileViewerModalProps {
   fileType: "proposal" | "orisinalitas";
 }
 
+// Cloudinary PDF thumbnail: works for /image/upload/ URLs (current uploads)
+// and older /raw/upload/ ones — Cloudinary renders the page as long as
+// delivery goes through the "image" resource type either way.
+const getPdfPreviewUrl = (pdfUrl: string) =>
+  pdfUrl.replace(/\/(image|raw)\/upload\//, "/image/upload/pg_1,f_jpg,w_800/");
+
 export default function FileViewerModal({
   isOpen,
   onCloseAction,
@@ -20,6 +26,8 @@ export default function FileViewerModal({
   teamName,
   fileType,
 }: FileViewerModalProps) {
+  const [previewFailed, setPreviewFailed] = useState(false);
+
   if (!isOpen) return null;
 
   const getFileTypeLabel = () => {
@@ -100,11 +108,22 @@ export default function FileViewerModal({
         {/* Content */}
         <div className="flex-1 p-4 overflow-hidden">
           {isPdf(fileUrl) ? (
-            <iframe
-              src={fileUrl}
-              className="w-full h-full border border-subtle rounded-lg"
-              title={`${getFileTypeLabel()} - ${teamName}`}
-            />
+            previewFailed ? (
+              <iframe
+                src={fileUrl}
+                className="w-full h-full border border-subtle rounded-lg"
+                title={`${getFileTypeLabel()} - ${teamName}`}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-[var(--secondary-bg)] rounded-lg overflow-auto">
+                <img
+                  src={getPdfPreviewUrl(fileUrl)}
+                  alt={`${getFileTypeLabel()} - ${teamName} (halaman 1)`}
+                  className="max-w-full h-auto object-contain rounded-lg"
+                  onError={() => setPreviewFailed(true)}
+                />
+              </div>
+            )
           ) : isImage(fileUrl) ? (
             <div className="w-full h-full flex items-center justify-center bg-[var(--secondary-bg)] rounded-lg">
               <img
