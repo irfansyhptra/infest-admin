@@ -777,7 +777,11 @@ export default function CompetitionDetailPage() {
                       <div className="flex items-center justify-between gap-4 p-2 bg-[var(--tertiary-bg)] rounded-lg">
                         <div className="flex items-center gap-2">
                           <FileText className="w-4 h-4 text-muted" />
-                          <span className="text-xs text-primary font-medium">Proposal</span>
+                          <span className="text-xs text-primary font-medium">
+                            {(competition?.name || "").toLowerCase().includes("data science")
+                              ? "Notebook (.ipynb)"
+                              : "Proposal"}
+                          </span>
                         </div>
                         <button
                           onClick={() =>
