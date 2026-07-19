@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "create-admin": "tsx src/libs/scripts/create-admin.ts",
+    "seed-admins": "tsx src/libs/scripts/seed-admins.ts",
     "setup-db": "psql -h db.qxesqdjdiuuzhmgadewe.supabase.co -U postgres -d postgres -f src/libs/scripts/admin_users_schema.sql",
     "broadcast:dry": "tsx src/libs/scripts/broadcast-email.ts",
     "broadcast:send": "tsx src/libs/scripts/broadcast-email.ts --send"
