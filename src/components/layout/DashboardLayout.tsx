@@ -14,6 +14,7 @@ import {
   Trophy,
   Users,
   User,
+  ShieldCheck,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { is } from "date-fns/locale";
@@ -58,6 +59,18 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       isActive: pathname.startsWith("/teams"),
       icon: <Users className="w-4 h-4 flex-shrink-0" />,
     },
+    // Hanya super admin. Ini sekadar menyembunyikan menu — penegakan yang
+    // sesungguhnya ada di requireSuperAdmin() pada API route-nya.
+    ...(user?.role === "SUPER_ADMIN"
+      ? [
+          {
+            label: "Kelola Admin",
+            href: "/admins",
+            isActive: pathname.startsWith("/admins"),
+            icon: <ShieldCheck className="w-4 h-4 flex-shrink-0" />,
+          },
+        ]
+      : []),
   ];
 
   const handleLogout = () => {

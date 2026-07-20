@@ -7,6 +7,7 @@ const PROTECTED_ROUTES = [
   '/users',
   '/competitions',
   '/teams',
+  '/admins',
   '/settings'
 ];
 

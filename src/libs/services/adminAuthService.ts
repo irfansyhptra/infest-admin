@@ -51,17 +51,14 @@ export class AdminAuthService {
         };
       }
 
-      const { data, error } = await supabase
-        .from("admin_users")
-        .select("admin_competition_id, role")
-        .eq("id", authData.user.id)
-        .single();
+      const record = await this.fetchAdminRecord(authData.user.id);
 
-      if (error) {
-        console.error("Error fetching admin user data:", error);
+      if (!record) {
+        // Punya akun auth tapi bukan admin aktif — jangan biarkan masuk.
+        await supabase.auth.signOut();
         return {
           success: false,
-          error: "Gagal mendapatkan data admin",
+          error: "Akun ini tidak terdaftar sebagai admin aktif",
         };
       }
 
@@ -70,8 +67,8 @@ export class AdminAuthService {
         username: authData.user.email?.split("@")[0] || "admin",
         email: authData.user.email || "",
         full_name: authData.user.user_metadata?.full_name || "Administrator",
-        role: data?.role || "ADMIN",
-        competition_id: data?.admin_competition_id || null,
+        role: record.role,
+        competition_id: record.competitionId,
         is_active: true,
         created_at: authData.user.created_at || new Date().toISOString(),
         updated_at:
@@ -120,28 +117,10 @@ export class AdminAuthService {
         return null;
       }
 
-      const { data, error: errorAdmin } = await supabase
-        .from("admin_users")
-        .select("admin_competition_id, role")
-        .eq("id", user.id)
-        .single();
+      const record = await this.fetchAdminRecord(user.id);
+      if (!record) return null;
 
-      if (errorAdmin) {
-        console.error("Error fetching admin user data:", errorAdmin);
-        return null;
-      }
-
-      const userAdmin = {
-        ...user,
-        user_metadata: { 
-          ...user.user_metadata,
-          role: data?.role || "ADMIN",
-          competition_id: data?.admin_competition_id || null,
-        },
-
-      };
-
-      return this.getAdminUserFromAuth(userAdmin);
+      return this.getAdminUserFromAuth(user, record.role, record.competitionId);
     } catch (error) {
       console.error("Get current user error:", error);
       return null;
@@ -159,18 +138,45 @@ export class AdminAuthService {
   /**
    * Get admin user data from auth user
    */
-  private getAdminUserFromAuth(authUser: User): AdminUser {
+  /**
+   * CATATAN KEAMANAN: `role` dan `competition_id` WAJIB berasal dari tabel
+   * admin_users, tidak boleh dari user_metadata. user_metadata bisa ditulis
+   * sendiri oleh pemilik akun (supabase.auth.updateUser({ data: ... })), jadi
+   * membacanya dari sana berarti user biasa bisa mengangkat dirinya jadi
+   * SUPER_ADMIN. Parameter `role`/`competitionId` di bawah selalu diisi
+   * pemanggil dari hasil query admin_users.
+   */
+  private getAdminUserFromAuth(
+    authUser: User,
+    role: AdminUser["role"],
+    competitionId: string | null
+  ): AdminUser {
     return {
       id: authUser.id,
       username: authUser.email?.split("@")[0] || "admin",
       email: authUser.email || "",
       full_name: authUser.user_metadata?.full_name || "Administrator",
-      role: authUser.user_metadata?.role || "ADMIN",
-      competition_id: authUser.user_metadata?.competition_id || null,
+      role,
+      competition_id: competitionId,
       is_active: true,
       created_at: authUser.created_at || new Date().toISOString(),
       updated_at: (authUser as any).updated_at || new Date().toISOString(),
       last_login: new Date().toISOString(),
+    };
+  }
+
+  /** Ambil role & lomba dari admin_users. null kalau user bukan admin. */
+  private async fetchAdminRecord(userId: string) {
+    const { data, error } = await supabase
+      .from("admin_users")
+      .select("admin_competition_id, role, is_active")
+      .eq("id", userId)
+      .single();
+
+    if (error || !data || data.is_active === false) return null;
+    return {
+      role: (data.role as AdminUser["role"]) || "ADMIN",
+      competitionId: data.admin_competition_id ?? null,
     };
   }
 
@@ -180,8 +186,10 @@ export class AdminAuthService {
   onAuthStateChange(callback: (user: AdminUser | null) => void) {
     return supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
-        const adminUser = this.getAdminUserFromAuth(session.user);
-        callback(adminUser);
+        // Lewat getCurrentUser() supaya role dibaca dari admin_users. Dulu di
+        // sini dipakai session.user mentah, yang berarti hasil login yang benar
+        // langsung ditimpa oleh role dari user_metadata milik user sendiri.
+        callback(await this.getCurrentUser());
       } else if (event === "SIGNED_OUT") {
         callback(null);
       }
@@ -200,16 +208,9 @@ export class AdminAuthService {
    */
   async refreshAuth(): Promise<AdminUser | null> {
     try {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-
-      if (error || !user) {
-        return null;
-      }
-
-      return this.getAdminUserFromAuth(user);
+      // getCurrentUser() membaca role dari admin_users; jangan kembali memakai
+      // getAdminUserFromAuth(user) mentah — itu jalur eskalasi user_metadata.
+      return await this.getCurrentUser();
     } catch (error) {
       console.error("Refresh auth error:", error);
       return null;

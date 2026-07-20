@@ -151,17 +151,47 @@ export const adminDashboardService = {
   },
 
   /**
+   * id semua tim yang terdaftar di sebuah lomba.
+   *
+   * Dipakai untuk membatasi admin lomba: peserta tidak terhubung langsung ke
+   * lomba — rantainya user_profiles.team_id -> competition_registrations.team_id
+   * -> competition_id. Jadi "peserta lomba saya" = peserta yang timnya punya
+   * pendaftaran di lomba itu.
+   *
+   * Array kosong berarti belum ada tim yang mendaftar, dan pemanggil memang
+   * harus mendapat hasil kosong — bukan seluruh data.
+   */
+  async getTeamIdsForCompetition(competitionId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from("competition_registrations")
+      .select("team_id")
+      .eq("competition_id", competitionId);
+
+    if (error) {
+      console.error("Error fetching team ids for competition:", error);
+      return [];
+    }
+    return (data || []).map((r: any) => r.team_id).filter(Boolean);
+  },
+
+  /**
    * Get dashboard statistics
    */
-  async getDashboardStats(): Promise<{
+  async getDashboardStats(competitionScope?: string | null): Promise<{
     stats: DashboardStats | null;
     error: string | null;
   }> {
     try {
+      // Admin lomba: semua angka dihitung hanya dari tim yang mendaftar di
+      // lombanya. null = super admin (seluruh data).
+      const scopeTeamIds = competitionScope
+        ? await this.getTeamIdsForCompetition(competitionScope)
+        : null;
+
       // Get user count
-      const { count: userCount, error: userError } = await supabase
-        .from("user_profiles")
-        .select("id", { count: "exact" });
+      let userQuery = supabase.from("user_profiles").select("id", { count: "exact" });
+      if (scopeTeamIds !== null) userQuery = userQuery.in("team_id", scopeTeamIds);
+      const { count: userCount, error: userError } = await userQuery;
 
       if (userError) {
         console.error("Error fetching user count:", userError);
@@ -169,10 +199,12 @@ export const adminDashboardService = {
       }
 
       // Get team count
-      const { count: teamCount, error: teamError } = await supabase
+      let teamQuery = supabase
         .from("teams")
         .select("id", { count: "exact" })
         .eq("status", "active");
+      if (scopeTeamIds !== null) teamQuery = teamQuery.in("id", scopeTeamIds);
+      const { count: teamCount, error: teamError } = await teamQuery;
 
       if (teamError) {
         console.error("Error fetching team count:", teamError);
@@ -180,11 +212,12 @@ export const adminDashboardService = {
       }
 
       // Get competition count
-      const { count: competitionCount, error: competitionError } =
-        await supabase
-          .from("competitions")
-          .select("id", { count: "exact" })
-          .in("status", ["open", "ongoing"]);
+      let competitionQuery = supabase
+        .from("competitions")
+        .select("id", { count: "exact" })
+        .in("status", ["open", "ongoing"]);
+      if (competitionScope) competitionQuery = competitionQuery.eq("id", competitionScope);
+      const { count: competitionCount, error: competitionError } = await competitionQuery;
 
       if (competitionError) {
         console.error("Error fetching competition count:", competitionError);
@@ -192,10 +225,9 @@ export const adminDashboardService = {
       }
 
       // Get registration statistics
-      const { data: registrationStats, error: registrationError } =
-        await supabase
-          .from("competition_registrations")
-          .select("status");
+      let regQuery = supabase.from("competition_registrations").select("status");
+      if (competitionScope) regQuery = regQuery.eq("competition_id", competitionScope);
+      const { data: registrationStats, error: registrationError } = await regQuery;
 
       if (registrationError) {
         console.error("Error fetching registration stats:", registrationError);
@@ -237,7 +269,8 @@ export const adminDashboardService = {
     page: number = 1,
     limit: number = 10,
     searchTerm?: string,
-    teamFilter?: "all" | "with" | "without"
+    teamFilter?: "all" | "with" | "without",
+    competitionScope?: string | null
   ): Promise<{
     users: UserProfile[] | null;
     total: number;
@@ -247,6 +280,12 @@ export const adminDashboardService = {
       const offset = (page - 1) * limit;
       const term = (searchTerm || "").trim();
       const like = term ? `%${term}%` : undefined;
+
+      // Admin lomba hanya boleh melihat peserta lombanya sendiri.
+      // null = super admin (tanpa batas).
+      const scopeTeamIds = competitionScope
+        ? await this.getTeamIdsForCompetition(competitionScope)
+        : null;
 
       // Optional: find team ids matching the search term (by name/code) for better search
       let teamIdsForSearch: string[] = [];
@@ -260,6 +299,7 @@ export const adminDashboardService = {
 
       // Build a base filter applier used for count and data queries equally
       const applyUserFilters = (q: any) => {
+        if (scopeTeamIds !== null) q = q.in("team_id", scopeTeamIds);
         if (teamFilter === "with") q = q.not("team_id", "is", null);
         if (teamFilter === "without") q = q.is("team_id", null);
         if (like) {
@@ -335,16 +375,18 @@ export const adminDashboardService = {
   /**
    * Get all competitions with registration details
    */
-  async getAllCompetitionsWithRegistrations(): Promise<{
+  async getAllCompetitionsWithRegistrations(competitionScope?: string | null): Promise<{
     competitions: CompetitionWithRegistrations[] | null;
     error: string | null;
   }> {
     try {
-      // Get all competitions
-      const { data: competitions, error: competitionsError } = await supabase
+      // Admin lomba hanya melihat lombanya sendiri di daftar.
+      let competitionsQuery = supabase
         .from("competitions")
         .select("*")
         .order("created_at", { ascending: false });
+      if (competitionScope) competitionsQuery = competitionsQuery.eq("id", competitionScope);
+      const { data: competitions, error: competitionsError } = await competitionsQuery;
 
       if (competitionsError) {
         console.error("Error fetching competitions:", competitionsError);
@@ -679,7 +721,8 @@ export const adminDashboardService = {
     page: number = 1,
     limit: number = 20,
     searchTerm?: string,
-    statusFilter?: string
+    statusFilter?: string,
+    competitionScope?: string | null
   ): Promise<{
     teams: TeamDetail[];
     totalTeams: number;
@@ -692,8 +735,14 @@ export const adminDashboardService = {
       const term = (searchTerm || "").trim();
       const wantsStatus = statusFilter && statusFilter !== "all";
 
+      // Admin lomba hanya melihat tim yang mendaftar di lombanya.
+      const scopeTeamIds = competitionScope
+        ? await this.getTeamIdsForCompetition(competitionScope)
+        : null;
+
       // Helper to apply common filters to a query
       const applyFilters = (q: any, usingView: boolean) => {
+        if (scopeTeamIds !== null) q = q.in("id", scopeTeamIds);
         if (wantsStatus) q = q.eq("status", statusFilter);
         if (term) {
           const like = `%${term}%`;

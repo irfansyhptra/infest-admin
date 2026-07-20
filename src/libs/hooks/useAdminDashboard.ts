@@ -9,18 +9,30 @@ import {
 } from "@/libs/services/adminDashboardService";
 import { useAdminAuth } from "../contexts/AdminAuthContext";
 import { isAuthorizedForCompetition } from "../helpers/competitionAuthorization";
+import type { AdminUser } from "@/types/admin";
+
+/**
+ * Batas lomba untuk query data. ADMIN dibatasi ke lombanya sendiri;
+ * SUPER_ADMIN mendapat null yang berarti tanpa batas.
+ */
+const scopeFor = (user: AdminUser | null): string | null =>
+  user?.role === "ADMIN" ? user.competition_id ?? null : null;
 
 export const useAdminDashboard = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchDashboardStats = async () => {
+    if (isAuthLoading || !user) return;
     setIsLoadingStats(true);
     setStatsError(null);
 
     try {
-      const { stats, error } = await adminDashboardService.getDashboardStats();
+      const { stats, error } = await adminDashboardService.getDashboardStats(
+        scopeFor(user)
+      );
 
       if (error) {
         setStatsError(error);
@@ -36,7 +48,7 @@ export const useAdminDashboard = () => {
 
   useEffect(() => {
     fetchDashboardStats();
-  }, []);
+  }, [user?.id, isAuthLoading]);
 
   return {
     stats,
@@ -56,8 +68,10 @@ export const useAdminUsers = (
   const [totalUsers, setTotalUsers] = useState(0);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchUsers = async () => {
+    if (isAuthLoading || !user) return;
     setIsLoadingUsers(true);
     setUsersError(null);
 
@@ -66,7 +80,8 @@ export const useAdminUsers = (
         page,
         limit,
         searchTerm,
-        teamFilter
+        teamFilter,
+        scopeFor(user)
       );
 
       if (error) {
@@ -84,7 +99,7 @@ export const useAdminUsers = (
 
   useEffect(() => {
     fetchUsers();
-  }, [page, limit, searchTerm, teamFilter]);
+  }, [page, limit, searchTerm, teamFilter, user?.id, isAuthLoading]);
 
   return {
     users,
@@ -103,14 +118,18 @@ export const useAdminCompetitions = () => {
   const [competitionsError, setCompetitionsError] = useState<string | null>(
     null
   );
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchCompetitions = async () => {
+    if (isAuthLoading || !user) return;
     setIsLoadingCompetitions(true);
     setCompetitionsError(null);
 
     try {
       const { competitions, error } =
-        await adminDashboardService.getAllCompetitionsWithRegistrations();
+        await adminDashboardService.getAllCompetitionsWithRegistrations(
+          scopeFor(user)
+        );
 
       if (error) {
         setCompetitionsError(error);
@@ -126,7 +145,7 @@ export const useAdminCompetitions = () => {
 
   useEffect(() => {
     fetchCompetitions();
-  }, []);
+  }, [user?.id, isAuthLoading]);
 
   return {
     competitions,
@@ -142,7 +161,7 @@ export const useCompetitionRegistrations = (competitionId: string) => {
   const [registrationsError, setRegistrationsError] = useState<string | null>(
     null
   );
-  const { user } = useAdminAuth();
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchRegistrations = async () => {
     if (!competitionId) {
@@ -150,10 +169,16 @@ export const useCompetitionRegistrations = (competitionId: string) => {
       return;
     }
 
-    // if (!isAuthorizedForCompetition(user, competitionId)) {
-    //   setRegistrationsError("You are not authorized to view these registrations.");
-    //   return;
-    // }
+    // Jangan putuskan otorisasi selagi auth masih dimuat: user sementara null,
+    // dan isAuthorizedForCompetition(null, ...) = false -> pesan "tidak
+    // berwenang" berkedip di setiap load halaman.
+    if (isAuthLoading || !user) return;
+
+    if (!isAuthorizedForCompetition(user, competitionId)) {
+      setRegistrations([]);
+      setRegistrationsError("Anda tidak berwenang melihat pendaftaran lomba ini.");
+      return;
+    }
 
     setIsLoadingRegistrations(true);
     setRegistrationsError(null);
@@ -176,7 +201,7 @@ export const useCompetitionRegistrations = (competitionId: string) => {
 
   useEffect(() => {
     fetchRegistrations();
-  }, [competitionId]);
+  }, [competitionId, user?.id, isAuthLoading]);
 
   const updateRegistrationStatus = async (
     registrationId: string,
@@ -221,14 +246,16 @@ export const useCompetitionDetail = (competitionId: string) => {
     useState<CompetitionWithRegistrations | null>(null);
   const [isLoadingCompetition, setIsLoadingCompetition] = useState(false);
   const [competitionError, setCompetitionError] = useState<string | null>(null);
-  const { user } = useAdminAuth();
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchCompetitionDetail = async () => {
     if (!competitionId) return;
-    // if (!isAuthorizedForCompetition(user, competitionId)) {
-    //   setCompetitionError("You are not authorized to manage this competition.");
-    //   return { success: false, error: "You can't manage this competition." };
-    // }
+    if (isAuthLoading || !user) return;
+    if (!isAuthorizedForCompetition(user, competitionId)) {
+      setCompetition(null);
+      setCompetitionError("Anda tidak berwenang mengelola lomba ini.");
+      return;
+    }
     setIsLoadingCompetition(true);
     setCompetitionError(null);
 
@@ -250,7 +277,7 @@ export const useCompetitionDetail = (competitionId: string) => {
 
   useEffect(() => {
     fetchCompetitionDetail();
-  }, [competitionId]);
+  }, [competitionId, user?.id, isAuthLoading]);
 
   const updateWhatsappGroup = async (whatsappGroup: string) => {
     try {
@@ -339,8 +366,10 @@ export const useAdminTeams = (
   const [totalTeams, setTotalTeams] = useState(0);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [teamsError, setTeamsError] = useState<string | null>(null);
+  const { user, isLoading: isAuthLoading } = useAdminAuth();
 
   const fetchTeams = async () => {
+    if (isAuthLoading || !user) return;
     setIsLoadingTeams(true);
     setTeamsError(null);
 
@@ -349,7 +378,8 @@ export const useAdminTeams = (
         page,
         limit,
         searchTerm,
-        statusFilter
+        statusFilter,
+        scopeFor(user)
       );
 
       if (error) {
@@ -367,7 +397,7 @@ export const useAdminTeams = (
 
   useEffect(() => {
     fetchTeams();
-  }, [page, limit, searchTerm, statusFilter]);
+  }, [page, limit, searchTerm, statusFilter, user?.id, isAuthLoading]);
 
   return {
     teams,
