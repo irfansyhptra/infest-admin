@@ -5,6 +5,8 @@ import { Toaster } from "react-hot-toast";
 import { AdminAuthProvider } from "@/libs/contexts/AdminAuthContext";
 import NextTopLoader from "nextjs-toploader";
 
+export const dynamic = "force-dynamic";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
