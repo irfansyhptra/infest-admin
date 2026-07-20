@@ -25,6 +25,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
   // Check authentication status on mount and listen for auth changes
   useEffect(() => {
     let cancelled = false;
+    let isCheckingAuth = true;
 
     const checkAuth = async () => {
       try {
@@ -34,7 +35,10 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
         console.error('Check auth error:', error);
         if (!cancelled) setUser(null);
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          isCheckingAuth = false;
+          setIsLoading(false);
+        }
       }
     };
 
@@ -44,7 +48,9 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
     const { data: { subscription } } = adminAuthService.onAuthStateChange((user) => {
       if (cancelled) return;
       setUser(user);
-      setIsLoading(false);
+      if (!isCheckingAuth) {
+        setIsLoading(false);
+      }
     });
 
     return () => {
