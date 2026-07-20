@@ -27,6 +27,7 @@ async function authedFetch(url: string, init: RequestInit = {}) {
   const token = data.session?.access_token;
   const res = await fetch(url, {
     ...init,
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token ?? ""}`,
