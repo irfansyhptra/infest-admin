@@ -3,6 +3,35 @@ import { AdminUser, AdminLoginResponse } from "@/types/admin";
 import { User } from "@supabase/supabase-js";
 
 export class AdminAuthService {
+  private lastFetchedUserId: string | null = null;
+  private lastFetchedUser: AdminUser | null = null;
+  private activeFetchPromise: Promise<{ role: AdminUser["role"], competitionId: string | null } | null> | null = null;
+  private activeFetchUserId: string | null = null;
+
+  private clearCache() {
+    this.lastFetchedUserId = null;
+    this.lastFetchedUser = null;
+    this.activeFetchPromise = null;
+    this.activeFetchUserId = null;
+  }
+
+  private async fetchAdminRecordCached(userId: string) {
+    if (this.activeFetchUserId === userId && this.activeFetchPromise) {
+      return this.activeFetchPromise;
+    }
+    
+    this.activeFetchUserId = userId;
+    this.activeFetchPromise = this.fetchAdminRecord(userId);
+    
+    try {
+      return await this.activeFetchPromise;
+    } finally {
+      if (this.activeFetchUserId === userId) {
+        this.activeFetchPromise = null;
+        this.activeFetchUserId = null;
+      }
+    }
+  }
   /**
    * Login admin dengan email dan password
    */
@@ -51,10 +80,11 @@ export class AdminAuthService {
         };
       }
 
-      const record = await this.fetchAdminRecord(authData.user.id);
+      const record = await this.fetchAdminRecordCached(authData.user.id);
 
       if (!record) {
         // Punya akun auth tapi bukan admin aktif — jangan biarkan masuk.
+        this.clearCache();
         await supabase.auth.signOut();
         return {
           success: false,
@@ -77,6 +107,10 @@ export class AdminAuthService {
           new Date().toISOString(),
         last_login: new Date().toISOString(),
       };
+      
+      this.lastFetchedUserId = authData.user.id;
+      this.lastFetchedUser = adminUser;
+      
       console.log("Login successful for user ID:", adminUser);
 
       return {
@@ -85,6 +119,7 @@ export class AdminAuthService {
       };
     } catch (error: any) {
       console.error("Login error:", error);
+      this.clearCache();
       return {
         success: false,
         error: "Terjadi kesalahan sistem",
@@ -97,6 +132,7 @@ export class AdminAuthService {
    */
   async logout(): Promise<void> {
     try {
+      this.clearCache();
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Logout error:", error);
@@ -109,20 +145,33 @@ export class AdminAuthService {
   async getCurrentUser(): Promise<AdminUser | null> {
     try {
       const {
-        data: { user },
+        data: { session },
         error,
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getSession();
 
-      if (error || !user) {
+      if (error || !session || !session.user) {
+        this.clearCache();
         return null;
       }
 
-      const record = await this.fetchAdminRecord(user.id);
-      if (!record) return null;
+      const userId = session.user.id;
+      if (this.lastFetchedUserId === userId && this.lastFetchedUser) {
+        return this.lastFetchedUser;
+      }
 
-      return this.getAdminUserFromAuth(user, record.role, record.competitionId);
+      const record = await this.fetchAdminRecordCached(userId);
+      if (!record) {
+        this.clearCache();
+        return null;
+      }
+
+      const adminUser = this.getAdminUserFromAuth(session.user, record.role, record.competitionId);
+      this.lastFetchedUserId = userId;
+      this.lastFetchedUser = adminUser;
+      return adminUser;
     } catch (error) {
       console.error("Get current user error:", error);
+      this.clearCache();
       return null;
     }
   }
@@ -185,12 +234,33 @@ export class AdminAuthService {
    */
   onAuthStateChange(callback: (user: AdminUser | null) => void) {
     return supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
-        // Lewat getCurrentUser() supaya role dibaca dari admin_users. Dulu di
-        // sini dipakai session.user mentah, yang berarti hasil login yang benar
-        // langsung ditimpa oleh role dari user_metadata milik user sendiri.
-        callback(await this.getCurrentUser());
-      } else if (event === "SIGNED_OUT") {
+      if (session?.user) {
+        const userId = session.user.id;
+        
+        // Gunakan cache jika data untuk userId ini sudah dimuat sebelumnya
+        if (this.lastFetchedUserId === userId && this.lastFetchedUser) {
+          callback(this.lastFetchedUser);
+          return;
+        }
+
+        try {
+          const record = await this.fetchAdminRecordCached(userId);
+          if (record) {
+            const adminUser = this.getAdminUserFromAuth(session.user, record.role, record.competitionId);
+            this.lastFetchedUserId = userId;
+            this.lastFetchedUser = adminUser;
+            callback(adminUser);
+          } else {
+            this.clearCache();
+            callback(null);
+          }
+        } catch (err) {
+          console.error("Error in onAuthStateChange fetch:", err);
+          this.clearCache();
+          callback(null);
+        }
+      } else {
+        this.clearCache();
         callback(null);
       }
     });
@@ -208,11 +278,11 @@ export class AdminAuthService {
    */
   async refreshAuth(): Promise<AdminUser | null> {
     try {
-      // getCurrentUser() membaca role dari admin_users; jangan kembali memakai
-      // getAdminUserFromAuth(user) mentah — itu jalur eskalasi user_metadata.
+      this.clearCache();
       return await this.getCurrentUser();
     } catch (error) {
       console.error("Refresh auth error:", error);
+      this.clearCache();
       return null;
     }
   }

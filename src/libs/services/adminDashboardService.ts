@@ -188,46 +188,52 @@ export const adminDashboardService = {
         ? await this.getTeamIdsForCompetition(competitionScope)
         : null;
 
-      // Get user count
-      let userQuery = supabase.from("user_profiles").select("id", { count: "exact" });
+      // Keempatnya tidak saling bergantung — dijalankan barengan. Berurutan
+      // artinya 4 round-trip ditumpuk, dan itu yang paling terasa waktu refresh.
+      //
+      // `head: true` bikin PostgREST cuma mengirim angka count-nya, bukan
+      // seluruh baris id yang tadinya diunduh lalu dibuang.
+      let userQuery = supabase
+        .from("user_profiles")
+        .select("id", { count: "exact", head: true });
       if (scopeTeamIds !== null) userQuery = userQuery.in("team_id", scopeTeamIds);
-      const { count: userCount, error: userError } = await userQuery;
+
+      let teamQuery = supabase
+        .from("teams")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "active");
+      if (scopeTeamIds !== null) teamQuery = teamQuery.in("id", scopeTeamIds);
+
+      let competitionQuery = supabase
+        .from("competitions")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["open", "ongoing"]);
+      if (competitionScope) competitionQuery = competitionQuery.eq("id", competitionScope);
+
+      let regQuery = supabase.from("competition_registrations").select("status");
+      if (competitionScope) regQuery = regQuery.eq("competition_id", competitionScope);
+
+      const [
+        { count: userCount, error: userError },
+        { count: teamCount, error: teamError },
+        { count: competitionCount, error: competitionError },
+        { data: registrationStats, error: registrationError },
+      ] = await Promise.all([userQuery, teamQuery, competitionQuery, regQuery]);
 
       if (userError) {
         console.error("Error fetching user count:", userError);
         return { stats: null, error: "Failed to fetch user statistics" };
       }
 
-      // Get team count
-      let teamQuery = supabase
-        .from("teams")
-        .select("id", { count: "exact" })
-        .eq("status", "active");
-      if (scopeTeamIds !== null) teamQuery = teamQuery.in("id", scopeTeamIds);
-      const { count: teamCount, error: teamError } = await teamQuery;
-
       if (teamError) {
         console.error("Error fetching team count:", teamError);
         return { stats: null, error: "Failed to fetch team statistics" };
       }
 
-      // Get competition count
-      let competitionQuery = supabase
-        .from("competitions")
-        .select("id", { count: "exact" })
-        .in("status", ["open", "ongoing"]);
-      if (competitionScope) competitionQuery = competitionQuery.eq("id", competitionScope);
-      const { count: competitionCount, error: competitionError } = await competitionQuery;
-
       if (competitionError) {
         console.error("Error fetching competition count:", competitionError);
         return { stats: null, error: "Failed to fetch competition statistics" };
       }
-
-      // Get registration statistics
-      let regQuery = supabase.from("competition_registrations").select("status");
-      if (competitionScope) regQuery = regQuery.eq("competition_id", competitionScope);
-      const { data: registrationStats, error: registrationError } = await regQuery;
 
       if (registrationError) {
         console.error("Error fetching registration stats:", registrationError);

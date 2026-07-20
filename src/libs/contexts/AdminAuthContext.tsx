@@ -24,16 +24,17 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
 
   // Check authentication status on mount and listen for auth changes
   useEffect(() => {
+    let cancelled = false;
+
     const checkAuth = async () => {
       try {
         const currentUser = await adminAuthService.getCurrentUser();
-        setUser(currentUser);
-        console.log('Current user:', currentUser);
+        if (!cancelled) setUser(currentUser);
       } catch (error) {
         console.error('Check auth error:', error);
-        setUser(null);
+        if (!cancelled) setUser(null);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
@@ -41,11 +42,13 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
 
     // Listen to auth state changes
     const { data: { subscription } } = adminAuthService.onAuthStateChange((user) => {
+      if (cancelled) return;
       setUser(user);
       setIsLoading(false);
     });
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
     };
   }, []);

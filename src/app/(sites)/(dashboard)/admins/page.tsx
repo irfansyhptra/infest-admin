@@ -3,7 +3,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ShieldCheck, Plus, Trash2, X, AlertTriangle, Loader2, Trophy } from "lucide-react";
 import { useAdminAuth } from "@/libs/contexts/AdminAuthContext";
-import { supabase } from "@/libs/services/supabaseClient";
+// Sengaja klien yang sama dengan seluruh app. Dulu di sini diimpor instance
+// kedua dari services/supabaseClient — dua GoTrueClient di satu tab, berebut
+// lock auth yang sama dan menjalankan refresh token dobel.
+import { supabase } from "@/libs/supabase/client";
 
 type AdminRow = {
   id: string;
