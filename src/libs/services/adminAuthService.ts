@@ -111,6 +111,17 @@ export class AdminAuthService {
       this.lastFetchedUserId = authData.user.id;
       this.lastFetchedUser = adminUser;
       
+      // Set cookie untuk middleware
+      if (typeof document !== "undefined" && authData.session) {
+        const cookieValue = encodeURIComponent(JSON.stringify([
+          authData.session.access_token,
+          authData.session.refresh_token,
+          null,
+          null
+        ]));
+        document.cookie = `sb-qxesqdjdiuuzhmgadewe-auth-token=${cookieValue}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax; Secure`;
+      }
+      
       console.log("Login successful for user ID:", adminUser);
 
       return {
@@ -133,6 +144,9 @@ export class AdminAuthService {
   async logout(): Promise<void> {
     try {
       this.clearCache();
+      if (typeof document !== "undefined") {
+        document.cookie = `sb-qxesqdjdiuuzhmgadewe-auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+      }
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Logout error:", error);
@@ -234,6 +248,21 @@ export class AdminAuthService {
    */
   onAuthStateChange(callback: (user: AdminUser | null) => void) {
     return supabase.auth.onAuthStateChange(async (event, session) => {
+      // Sinkronisasi cookie untuk middleware
+      if (typeof document !== "undefined") {
+        if (session) {
+          const cookieValue = encodeURIComponent(JSON.stringify([
+            session.access_token,
+            session.refresh_token,
+            null,
+            null
+          ]));
+          document.cookie = `sb-qxesqdjdiuuzhmgadewe-auth-token=${cookieValue}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax; Secure`;
+        } else {
+          document.cookie = `sb-qxesqdjdiuuzhmgadewe-auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+        }
+      }
+
       if (session?.user) {
         const userId = session.user.id;
         
