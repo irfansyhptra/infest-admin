@@ -229,18 +229,30 @@ export class AdminAuthService {
   }
 
   /** Ambil role & lomba dari admin_users. null kalau user bukan admin. */
-  private async fetchAdminRecord(userId: string) {
-    const { data, error } = await supabase
-      .from("admin_users")
-      .select("admin_competition_id, role, is_active")
-      .eq("id", userId)
-      .single();
+  private async fetchAdminRecord(userId: string): Promise<{ role: AdminUser["role"]; competitionId: string | null } | null> {
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout fetching admin record")), 5000)
+    );
 
-    if (error || !data || data.is_active === false) return null;
-    return {
-      role: (data.role as AdminUser["role"]) || "ADMIN",
-      competitionId: data.admin_competition_id ?? null,
-    };
+    try {
+      const queryPromise = supabase
+        .from("admin_users")
+        .select("admin_competition_id, role, is_active")
+        .eq("id", userId)
+        .single()
+        .then(({ data, error }) => {
+          if (error || !data || data.is_active === false) return null;
+          return {
+            role: (data.role as AdminUser["role"]) || "ADMIN",
+            competitionId: (data.admin_competition_id as string | null) ?? null,
+          };
+        });
+
+      return await Promise.race([queryPromise, timeoutPromise]) as { role: AdminUser["role"]; competitionId: string | null } | null;
+    } catch (err) {
+      console.error("fetchAdminRecord error or timeout:", err);
+      return null;
+    }
   }
 
   /**

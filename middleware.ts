@@ -37,12 +37,6 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set('redirectTo', pathname);
     return NextResponse.redirect(loginUrl);
   }
-  
-  if (isAuthRoute && authToken) {
-    // User trying to access login while authenticated - redirect to dashboard
-    const redirectTo = request.nextUrl.searchParams.get('redirectTo') || '/';
-    return NextResponse.redirect(new URL(redirectTo, request.url));
-  }
 
   return NextResponse.next();
 }
