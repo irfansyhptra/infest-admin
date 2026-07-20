@@ -28,15 +28,7 @@ const createMockSupabase = () => {
 };
 
 export const supabase: SupabaseClient = (supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache",
-          "Expires": "0",
-        },
-      },
-    })
+  ? createClient(supabaseUrl, supabaseAnonKey)
   : createMockSupabase()) as any;
 
 export default supabase;

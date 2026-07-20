@@ -31,7 +31,7 @@ const getSupabaseServiceRoleKey = () => {
   if (typeof window !== 'undefined') {
     throw new Error('Service role key tidak boleh dipakai di browser')
   }
-  return process.env.SUPABASE_SERVICE_ROLE_KEY!
+  return process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
 }
 
 const supabaseUrl = getSupabaseUrl()
