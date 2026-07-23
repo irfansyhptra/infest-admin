@@ -179,7 +179,7 @@ export default function CompetitionDetailPage() {
         .toLowerCase()
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9-_]/g, "");
-      const filename = `${slugSafe}_registrations_infest2025.csv`;
+      const filename = `${slugSafe}_registrations_infest2026.csv`;
 
       const link = document.createElement("a");
       link.href = url;

@@ -1,6 +1,6 @@
-# Admin Panel INFEST USK 2025
+# Admin Panel INFEST USK 2026
 
-Backoffice administration panel untuk Informatics Festival XI 2025 yang diselenggarakan oleh Himpunan Mahasiswa Informatika USK.
+Backoffice administration panel untuk Informatics Festival XII 2026 yang diselenggarakan oleh Himpunan Mahasiswa Informatika USK.
 
 ## 🚀 Fitur Utama
 
@@ -53,7 +53,7 @@ Project ini menggunakan database yang sama dengan frontpage (web-infest) dengan 
 ### Prerequisites
 - Node.js 18+ 
 - Yarn atau NPM
-- Akses ke Supabase database INFEST USK 2025
+- Akses ke Supabase database INFEST USK 2026
 
 ### Installation
 
@@ -255,10 +255,10 @@ yarn start
 
 ## 📝 License
 
-Project ini adalah bagian dari INFEST USK 2025 - Himpunan Mahasiswa Informatika USK.
+Project ini adalah bagian dari INFEST USK 2026 - Himpunan Mahasiswa Informatika USK.
 
 ---
 
-**Developed with ❤️ for INFEST USK 2025**
+**Developed with ❤️ for INFEST USK 2026**
 
-*Informatics Festival XI - Bringing Innovation to Life*
+*Informatics Festival XII - Bringing Innovation to Life*

@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Admin Panel - INFEST USK 2025",
-  description: "Backoffice untuk manajemen Informatics Festival USK 2025",
+  title: "Admin Panel - INFEST USK 2026",
+  description: "Backoffice untuk manajemen Informatics Festival USK 2026",
   icons: {
     icon: [
       { url: "/images/HMIF-No-BG.png", type: "image/png" },

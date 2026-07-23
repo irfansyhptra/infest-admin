@@ -129,9 +129,9 @@ const generateEmailTemplate = (data: {
             ${buildLogoGridSection("Media Partners", mediaPartners as any)}
           </div>
           
-          <p>Terima kasih telah berpartisipasi dalam INFEST 2025!</p>
+          <p>Terima kasih telah berpartisipasi dalam INFEST 2026!</p>
           
-          <p>Salam,<br>INFEST 2025</p>
+          <p>Salam,<br>INFEST 2026</p>
         </div>
         <div class="footer">
           <p>Email ini dikirim secara otomatis. Mohon tidak membalas email ini.</p>
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const subject = `INFEST 2025 - Pendaftaran ${
+    const subject = `INFEST 2026 - Pendaftaran ${
       status === "approved" ? "Disetujui" : "Ditolak"
     }: ${teamName}`;
     const htmlContent = generateEmailTemplate(data);

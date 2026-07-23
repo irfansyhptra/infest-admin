@@ -1,6 +1,6 @@
-# Analisis Arsitektur Backend & Dokumentasi API: INFEST USK 2025
+# Analisis Arsitektur Backend & Dokumentasi API: INFEST USK 2026
 
-Dokumentasi ini berisi hasil analisis menyeluruh arsitektur backend, alur autentikasi, model database, skema validasi, dan temuan teknis (security/bugs) pada project Next.js **INFEST USK 2025 Admin**.
+Dokumentasi ini berisi hasil analisis menyeluruh arsitektur backend, alur autentikasi, model database, skema validasi, dan temuan teknis (security/bugs) pada project Next.js **INFEST USK 2026 Admin**.
 
 ---
 
@@ -25,7 +25,7 @@ Dokumentasi ini berisi hasil analisis menyeluruh arsitektur backend, alur autent
 
 ## 1. Pendahuluan & Paradigma Arsitektur
 
-Project **INFEST USK 2025 Admin** merupakan aplikasi backoffice untuk mengelola pendaftaran peserta, tim, dan administrasi kompetisi Informatika Festival (INFEST) Universitas Syiah Kuala 2025. 
+Project **INFEST USK 2026 Admin** merupakan aplikasi backoffice untuk mengelola pendaftaran peserta, tim, dan administrasi kompetisi Informatika Festival (INFEST) Universitas Syiah Kuala 2026. 
 
 Secara paradigma arsitektural, aplikasi ini menerapkan **Backend-as-a-Service (BaaS)** berbasis **Supabase**. Mayoritas operasi manipulasi database dan manajemen autentikasi diinisiasi langsung dari client-side browser menggunakan SDK Supabase Client (`@supabase/supabase-js`), memanfaatkan Row Level Security (RLS) pada PostgreSQL untuk keamanan.
 
